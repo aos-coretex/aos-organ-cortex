@@ -1,0 +1,16 @@
+{
+  "name": "@coretex/organ-cortex",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Cortex organ (#225) — Strategic Brain / Autonomous Assessment Loop",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@coretex/organ-boot": "file:../../organ-shared-lib",
+    "express": "^5.1.0"
+  }
+}

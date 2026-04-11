@@ -1,0 +1,62 @@
+/**
+ * Cortex configuration — environment-driven, AOS/SAAS aware.
+ *
+ * Follows the Senate/Cerberus precedent. LLM config uses shared-lib field
+ * names per systemic bug #8 (createLLMClient takes { agentName, defaultModel,
+ * defaultProvider, apiKeyEnvVar, maxTokens } directly).
+ */
+
+const env = process.env.NODE_ENV || 'development';
+const isAOS = env !== 'production';
+
+export default {
+  name: 'Cortex',
+  port: parseInt(process.env.CORTEX_PORT || (isAOS ? '4040' : '3940'), 10),
+  binding: '127.0.0.1',
+
+  // Spine (hard dep)
+  spineUrl: process.env.SPINE_URL || (isAOS ? 'http://127.0.0.1:4000' : 'http://127.0.0.1:3900'),
+
+  // Collective Memory HTTP endpoints (soft deps — degrade gracefully)
+  graphUrl:       process.env.GRAPH_URL       || (isAOS ? 'http://127.0.0.1:4020' : 'http://127.0.0.1:3920'),
+  arbiterUrl:     process.env.ARBITER_URL     || (isAOS ? 'http://127.0.0.1:4021' : 'http://127.0.0.1:3921'),
+  radiantUrl:     process.env.RADIANT_URL     || (isAOS ? 'http://127.0.0.1:4006' : 'http://127.0.0.1:3906'),
+  minderUrl:      process.env.MINDER_URL      || (isAOS ? 'http://127.0.0.1:4007' : 'http://127.0.0.1:3907'),
+  hippocampusUrl: process.env.HIPPOCAMPUS_URL || (isAOS ? 'http://127.0.0.1:4008' : 'http://127.0.0.1:3908'),
+
+  // CM query timeouts (per-organ, in ms)
+  cmQueryTimeoutMs: parseInt(process.env.CORTEX_CM_TIMEOUT_MS || '5000', 10),
+
+  // Graph adapter timeout — bounds queryConcepts()/getConcept() outbound HTTP.
+  // Repair #09 x2p-2 O3: prior graph-adapter had no abort controller, so a
+  // hung Graph query could stall the assessment loop. 3000ms is tighter than
+  // cmQueryTimeoutMs because Graph is a soft dep with fast local SQLite.
+  graphTimeoutMs: parseInt(process.env.CORTEX_GRAPH_TIMEOUT_MS || '3000', 10),
+
+  // Assessment loop cadence (RFI-1 Q5 — confirmed verbatim)
+  loop: {
+    floorMs:    parseInt(process.env.CORTEX_LOOP_FLOOR_MS   || '30000', 10),   // 30s
+    ceilingMs:  parseInt(process.env.CORTEX_LOOP_CEILING_MS || '900000', 10),  // 15min
+    startMs:    parseInt(process.env.CORTEX_LOOP_START_MS   || '300000', 10),  // 5min
+    gapDivisor: 2,    // next = max(floor, current / 2)  on gaps found
+    idleFactor: 1.5,  // next = min(ceiling, current * 1.5) on idle
+    pressureFactor: 2, // next = min(ceiling, current * 2) on Thalamus mailbox_pressure
+  },
+
+  // Mission cache TTL (fallback when msp_updated / bor_updated broadcasts are missing)
+  missionCacheTtlMs: parseInt(process.env.CORTEX_MISSION_TTL_MS || '600000', 10), // 10min
+
+  // LLM configuration for gap analysis — shared-lib field names (bug #8)
+  llm: {
+    agentName: 'cortex-gap-analyzer',
+    defaultModel: process.env.CORTEX_MODEL || 'claude-sonnet-4-6',
+    defaultProvider: 'anthropic',
+    apiKeyEnvVar: 'ANTHROPIC_API_KEY',
+    maxTokens: 4096,
+  },
+
+  // Dependencies passed to createOrgan — Spine only
+  dependencies: ['Spine'],
+
+  env,
+};
