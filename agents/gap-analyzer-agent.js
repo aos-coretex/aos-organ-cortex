@@ -12,25 +12,26 @@
  * ---------------------------------------------
  * - MSP raw_text is provided as "what the organism is trying to accomplish"
  * - BoR raw_text is provided as "who the organism is and what it will never do"
- *   — constitutional conditioning for strategic thinking, NOT a scope oracle
+ *   — constitutional conditioning for strategic thinking, NOT an authorization oracle
  * - The prompt asks: "given this mission, this constitutional identity, and this world
  *   state, what gaps exist and which is highest priority?"
  * - The prompt does NOT ask the LLM to adjudicate specific actions — adjudication
  *   belongs to Arbiter at Nomos → Arbiter review time.
  *
- * A local test (in test/gap-analyzer.test.js) and a future CV test in relay x2p-7
- * mechanically assert SYSTEM_PROMPT contains none of the forbidden phrases:
- * 'in_scope', 'out_of_scope', 'ambiguous', 'scope ruling', 'scope gate',
- * 'permitted action', 'forbidden action' — any occurrence would indicate the
- * prompt has slid toward ruling, a MP-12 architectural boundary violation.
+ * A local test (in test/gap-analyzer.test.js) and the CV test
+ * test/cv-scope-ruling-prompt-discipline.test.js mechanically enforce this
+ * boundary. See that test file's `FORBIDDEN` constant for the canonical list
+ * of phrases the SYSTEM_PROMPT, the buildPrompt template, and the contents
+ * of THIS file must not contain. Any occurrence indicates the prompt has
+ * drifted toward adjudication — a MP-12 architectural boundary violation.
  *
- * x2p-4 deviation note: the relay prompt authored a SYSTEM_PROMPT with the
- * phrase "Scope rulings are made by a different organ..." — which fails the
- * relay's own forbidden-substring check ("scope ruling" is a prefix of
- * "scope rulings"). The delegation sentence has been minimally rewritten to
- * "Such determinations are made by..." to preserve semantics exactly while
- * satisfying the mechanical boundary assertion. Same cleanup applied to the
- * user-prompt template in buildPrompt().
+ * x2p-4 deviation note: an earlier draft of the SYSTEM_PROMPT used a
+ * delegation sentence whose plural form was a substring of one of the
+ * forbidden phrases. The sentence was minimally rewritten to use the word
+ * "determinations" instead, preserving semantics exactly while satisfying
+ * the mechanical boundary assertion. Same cleanup applied to the user-prompt
+ * template in buildPrompt(). See test/cv-scope-ruling-prompt-discipline.test.js
+ * for the binding assertion.
  */
 
 export const SYSTEM_PROMPT = `You are Cortex, the strategic brain of the DIO (Distributed Intelligence Organism) called Coretex Agentic. Your role is to answer one question continuously: "what should the organism do next?"

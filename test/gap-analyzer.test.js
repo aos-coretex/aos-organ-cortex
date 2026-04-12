@@ -168,3 +168,18 @@ test('parseResponse strips markdown code fences', () => {
   const { gaps } = parseResponse(body);
   assert.equal(gaps.length, 1);
 });
+
+test('analyzeGaps function exposes its llm reference (x2p-7 §6.2)', () => {
+  // server/index.js threads gapAnalyzer.llm into buildHealthCheck so /health
+  // can report real llm_available state instead of the hardcoded "true"
+  // approximation. The test asserts the property exists and matches the
+  // injected stub.
+  const llm = { isAvailable: () => true, chat: async () => null, getUsage: () => ({}) };
+  const analyzer = createGapAnalyzer({
+    llmConfig: { agentName: 'test' },
+    injectedLlm: llm,
+    goalHistory: createGoalHistory(),
+  });
+  assert.equal(analyzer.llm, llm, 'analyzer should expose its llm reference');
+  assert.equal(typeof analyzer.llm.isAvailable, 'function');
+});

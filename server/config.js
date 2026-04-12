@@ -33,6 +33,13 @@ export default {
   // cmQueryTimeoutMs because Graph is a soft dep with fast local SQLite.
   graphTimeoutMs: parseInt(process.env.CORTEX_GRAPH_TIMEOUT_MS || '3000', 10),
 
+  // Dependency re-probe cycle — how often to refresh the boot-time soft-dep
+  // reachability snapshot. x2p-6 O1: prior boot probed once and the result
+  // never changed for the lifetime of the process, leaving /health stale
+  // when CM organs recovered. x2p-7 §6.1: re-probe on a fixed interval so
+  // /health reflects live reachability without operator restart.
+  dependencyProbeIntervalMs: parseInt(process.env.CORTEX_DEPENDENCY_PROBE_INTERVAL_MS || '60000', 10),
+
   // Assessment loop cadence (RFI-1 Q5 — confirmed verbatim)
   loop: {
     floorMs:    parseInt(process.env.CORTEX_LOOP_FLOOR_MS   || '30000', 10),   // 30s
