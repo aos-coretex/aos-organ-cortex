@@ -112,3 +112,45 @@ test('introspectCheck mission_cache_loaded false when cache empty', async () => 
   const out = await introspect();
   assert.equal(out.mission_cache_loaded, false);
 });
+
+// --- C2A-04: introspect degraded_ratio ---
+
+test('introspectCheck includes degraded_ratio when assessmentRing is provided', async () => {
+  const fakeRing = {
+    snapshot: (windowMs) => ({
+      window_ms: windowMs,
+      total_iterations: 100,
+      degraded_iterations: 10,
+      ratio: 0.1,
+      flag_breakdown: { 'llm-unavailable': 8, 'spine-state-unavailable-halt': 2 },
+      oldest_at: '2026-04-12T09:00:00Z',
+      newest_at: '2026-04-12T10:00:00Z',
+    }),
+    size: () => 100,
+  };
+  const introspect = buildIntrospectCheck({
+    cadence: { floorMs: 30000 },
+    assessmentLoop: fakeLoopStats(),
+    goalHistory: { size: () => 0 },
+    missionLoader: { peekCache: () => null },
+    assessmentRing: fakeRing,
+  });
+  const out = await introspect();
+  assert.ok(out.degraded_ratio, 'degraded_ratio should be present');
+  assert.ok(out.degraded_ratio['1h'], '1h window should be present');
+  assert.ok(out.degraded_ratio['24h'], '24h window should be present');
+  assert.equal(out.degraded_ratio['1h'].ratio, 0.1);
+  assert.equal(out.degraded_ratio.ring_size, 100);
+  assert.equal(out.degraded_ratio.ring_capacity, 1440);
+});
+
+test('introspectCheck omits degraded_ratio when no assessmentRing', async () => {
+  const introspect = buildIntrospectCheck({
+    cadence: {},
+    assessmentLoop: fakeLoopStats(),
+    goalHistory: { size: () => 0 },
+    missionLoader: { peekCache: () => null },
+  });
+  const out = await introspect();
+  assert.equal(out.degraded_ratio, undefined);
+});

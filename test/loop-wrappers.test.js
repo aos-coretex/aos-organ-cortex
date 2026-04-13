@@ -157,3 +157,57 @@ test('wrappedGapAnalyzer propagates degraded array to currentAssessmentMeta on h
     ['world:minder-degraded', 'llm-parse-error: x'],
   );
 });
+
+// --- C2A-04: assessmentRing integration ---
+
+test('createStateHolders pushes to assessmentRing on meta.set()', () => {
+  const pushed = [];
+  const fakeRing = { push: (entry) => pushed.push(entry) };
+  const { currentAssessmentMeta } = createStateHolders({ assessmentRing: fakeRing });
+  currentAssessmentMeta.set({ lastAt: '2026-04-12T10:00:00Z', degraded: ['llm-unavailable'] });
+  assert.equal(pushed.length, 1);
+  assert.equal(pushed[0].at, '2026-04-12T10:00:00Z');
+  assert.deepEqual(pushed[0].degraded, ['llm-unavailable']);
+});
+
+test('createStateHolders works without assessmentRing (backwards compat)', () => {
+  const { currentAssessmentMeta } = createStateHolders();
+  currentAssessmentMeta.set({ lastAt: '2026-04-12T10:00:00Z', degraded: [] });
+  assert.equal(currentAssessmentMeta.get().lastAt, '2026-04-12T10:00:00Z');
+});
+
+test('wrappedCmClient halt path pushes to ring via meta.set()', async () => {
+  const pushed = [];
+  const fakeRing = { push: (entry) => pushed.push(entry) };
+  const holders = createStateHolders({ assessmentRing: fakeRing });
+  const cmClient = async () => ({
+    snapshot: { spine_state: null },
+    degraded: [],
+  });
+  const wrapped = createCmClientWrapper({
+    cmClient,
+    currentWorldState: holders.currentWorldState,
+    currentAssessmentMeta: holders.currentAssessmentMeta,
+  });
+  await wrapped({});
+  assert.equal(pushed.length, 1);
+  assert.deepEqual(pushed[0].degraded, ['spine-state-unavailable-halt']);
+});
+
+test('wrappedGapAnalyzer normal path pushes to ring via meta.set()', async () => {
+  const pushed = [];
+  const fakeRing = { push: (entry) => pushed.push(entry) };
+  const holders = createStateHolders({ assessmentRing: fakeRing });
+  const gapAnalyzer = async () => ({
+    gaps: [{ gap_id: 'g1' }],
+    degraded: ['world:radiant-degraded'],
+  });
+  const wrapped = createGapAnalyzerWrapper({
+    gapAnalyzer,
+    currentGaps: holders.currentGaps,
+    currentAssessmentMeta: holders.currentAssessmentMeta,
+  });
+  await wrapped({ msp: null }, { snapshot: { spine_state: {} }, degraded: [] });
+  assert.equal(pushed.length, 1);
+  assert.deepEqual(pushed[0].degraded, ['world:radiant-degraded']);
+});

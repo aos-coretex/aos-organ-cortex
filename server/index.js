@@ -40,6 +40,7 @@ import {
   createStateHolders,
 } from '../lib/loop-wrappers.js';
 import { buildHealthCheck, buildIntrospectCheck } from '../lib/health-probes.js';
+import { createAssessmentRing } from '../lib/assessment-ring.js';
 import { timedFetch } from '../lib/http-helpers.js';
 
 import { createDirectedHandler } from '../handlers/spine-commands.js';
@@ -138,7 +139,11 @@ const goalEmitter = createGoalEmitter({
 
 // --- Observability state holders + loop wrappers (extracted to lib/loop-wrappers.js) ---
 
-const { currentGaps, currentAssessmentMeta, currentWorldState } = createStateHolders();
+// C2A-04: in-memory ring buffer for degraded-iteration ratio (Option 1).
+// Pushed on every currentAssessmentMeta.set() — one entry per assessment iteration.
+const assessmentRing = createAssessmentRing({ capacity: 1440 });
+
+const { currentGaps, currentAssessmentMeta, currentWorldState } = createStateHolders({ assessmentRing });
 
 const wrappedCmClient = createCmClientWrapper({
   cmClient,
@@ -201,11 +206,13 @@ const organ = await createOrgan({
   }),
 
   // Flat return (bug #9) — shared-lib wraps into `extra`.
+  // C2A-04: assessmentRing feeds degraded_ratio into /introspect.
   introspectCheck: buildIntrospectCheck({
     cadence: config.loop,
     assessmentLoop,
     goalHistory,
     missionLoader,
+    assessmentRing,
   }),
 
   onStartup: async ({ spine }) => {
