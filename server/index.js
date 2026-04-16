@@ -24,6 +24,8 @@
 
 import config from './config.js';
 import { createOrgan } from '@coretex/organ-boot';
+import { createLoader } from '@coretex/organ-boot/llm-settings-loader';
+import { initializeUsageAttribution } from '@coretex/organ-boot/usage-attribution';
 
 import { createGraphAdapter } from '../lib/graph-adapter.js';
 import { createArbiterClient } from '../lib/arbiter-client.js';
@@ -126,8 +128,43 @@ const cmClient = createCmClient({
 const goalHistory = createGoalHistory({ limit: 20 });
 const spineProxy = createSpineProxy();
 
+// --- LLM settings loader (MP-CONFIG-1 R7 migration — l9m-7) ---
+// Cortex remains DORMANT per binding decision (session-8 cost discovery).
+// Migration makes Cortex redirectable to Haiku via settings alone; R12's
+// restart gate is where re-enablement is tested. This relay does NOT start
+// Cortex as a LaunchAgent. Bug #8 field-name discipline is load-bearing —
+// `toLLMClientConfig` from the loader emits `agentName`/`defaultModel`/
+// `defaultProvider`/`apiKeyEnvVar`/`maxTokens` verbatim.
+
+const llmLoader = createLoader({
+  organNumber: 225,
+  organName: 'cortex',
+  settingsRoot: config.settingsRoot,
+});
+
+// MP-CONFIG-1 R9 — register the process-default usage writer. Cortex stays
+// DORMANT by binding decision; this wiring arms the audit trail for R12's
+// restart gate so the Haiku-downshift projection has real llm_usage_event
+// records to aggregate.
+initializeUsageAttribution({ organName: 'Cortex', graphUrl: config.graphUrl });
+
+function buildLlmClient(agentName) {
+  const { config: resolved, chat } = llmLoader.resolveWithCascade(agentName);
+  const apiKeyEnv = resolved.apiKeyEnvVar || 'ANTHROPIC_API_KEY';
+  return {
+    chat,
+    isAvailable: () => Boolean(process.env[apiKeyEnv]),
+    getUsage: () => ({ agent: resolved.agentName, model: resolved.defaultModel, provider: resolved.defaultProvider }),
+  };
+}
+
+const gapAnalyzerLlmConfig = llmLoader.resolve('gap-analyzer');
+const gapAnalyzerLlmClient = buildLlmClient('gap-analyzer');
+
 const gapAnalyzer = createGapAnalyzer({
-  llmConfig: config.llm,
+  // Preserve the `llmConfig` field (bug #8 shape) for internal `maxTokens` consumer.
+  llmConfig: gapAnalyzerLlmConfig,
+  injectedLlm: gapAnalyzerLlmClient,
   goalHistory,
 });
 
@@ -213,6 +250,7 @@ const organ = await createOrgan({
     goalHistory,
     missionLoader,
     assessmentRing,
+    llmLoader,
   }),
 
   onStartup: async ({ spine }) => {

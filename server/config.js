@@ -9,6 +9,9 @@
 const env = process.env.NODE_ENV || 'development';
 const isAOS = env !== 'production';
 
+const vaultRoot = process.env.VAULT_ROOT
+  || '/Library/AI/AI-Infra-MDvaults/MDvault-LLM-Ops';
+
 export default {
   name: 'Cortex',
   port: parseInt(process.env.CORTEX_PORT || (isAOS ? '4040' : '3940'), 10),
@@ -53,17 +56,11 @@ export default {
   // Mission cache TTL (fallback when msp_updated / bor_updated broadcasts are missing)
   missionCacheTtlMs: parseInt(process.env.CORTEX_MISSION_TTL_MS || '600000', 10), // 10min
 
-  // LLM configuration for gap analysis — shared-lib field names (bug #8)
-  llm: {
-    agentName: 'cortex-gap-analyzer',
-    defaultModel: process.env.CORTEX_MODEL || 'claude-sonnet-4-6',
-    defaultProvider: 'anthropic',
-    apiKeyEnvVar: 'ANTHROPIC_API_KEY',
-    maxTokens: 4096,
-  },
-
   // Dependencies passed to createOrgan — Spine only
   dependencies: ['Spine'],
+
+  vaultRoot,
+  settingsRoot: process.env.SETTINGS_ROOT || `${vaultRoot}/01-Organs`,
 
   env,
 };
