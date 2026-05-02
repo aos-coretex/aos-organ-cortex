@@ -276,6 +276,104 @@ test('composed_at and window_since are ISO8601', async () => {
   assert.match(snapshot.window_since, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
 });
 
+test('p4r-3: result includes correlation_id (string) for stitching with prompt-size-breakdown', async () => {
+  routeFetch(happyRoutes);
+  const client = createCmClient({
+    radiantUrl: 'http://r', minderUrl: 'http://m', hippocampusUrl: 'http://h',
+    graphAdapter: fakeGraph(), spineUrl: 'http://s',
+  });
+  const result = await client({});
+  assert.equal(typeof result.correlation_id, 'string');
+  assert.ok(result.correlation_id.length > 0);
+});
+
+test('p4r-3: cmClient exposes readSlice(name) for per-section assessment cycles', async () => {
+  routeFetch(happyRoutes);
+  const client = createCmClient({
+    radiantUrl: 'http://r', minderUrl: 'http://m', hippocampusUrl: 'http://h',
+    graphAdapter: fakeGraph(), spineUrl: 'http://s',
+  });
+  assert.equal(typeof client.readSlice, 'function');
+  const radiant = await client.readSlice('radiant');
+  assert.equal(radiant.ok, true);
+  assert.equal(radiant.source, 'Radiant');
+  assert.ok(radiant.data.recent_context);
+  // _cache metadata stripped from readSlice() return
+  assert.equal(radiant._cache, undefined);
+});
+
+test('p4r-3: cmClient.readSlice throws on unknown slice name', async () => {
+  routeFetch(happyRoutes);
+  const client = createCmClient({
+    radiantUrl: 'http://r', minderUrl: 'http://m', hippocampusUrl: 'http://h',
+    graphAdapter: fakeGraph(), spineUrl: 'http://s',
+  });
+  await assert.rejects(client.readSlice('not-a-slice'), /Unknown slice/);
+});
+
+test('p4r-3: cmClient.checkSpineAvailable probes /health and returns boolean', async () => {
+  const routes = { ...happyRoutes, '/health': { status: 200, body: { status: 'ok' } } };
+  routeFetch(routes);
+  const client = createCmClient({
+    radiantUrl: 'http://r', minderUrl: 'http://m', hippocampusUrl: 'http://h',
+    graphAdapter: fakeGraph(), spineUrl: 'http://s',
+  });
+  assert.equal(typeof client.checkSpineAvailable, 'function');
+  const ok = await client.checkSpineAvailable();
+  assert.equal(ok, true);
+});
+
+test('p4r-3: cmClient.checkSpineAvailable returns false when /health unreachable', async () => {
+  routeFetch({});
+  const client = createCmClient({
+    radiantUrl: 'http://r', minderUrl: 'http://m', hippocampusUrl: 'http://h',
+    graphAdapter: fakeGraph(), spineUrl: 'http://s',
+  });
+  const ok = await client.checkSpineAvailable();
+  assert.equal(ok, false);
+});
+
+test('p4r-3: cmClient.sliceClients exposes per-slice clients for introspection', async () => {
+  routeFetch(happyRoutes);
+  const client = createCmClient({
+    radiantUrl: 'http://r', minderUrl: 'http://m', hippocampusUrl: 'http://h',
+    graphAdapter: fakeGraph(), spineUrl: 'http://s',
+  });
+  assert.ok(client.sliceClients);
+  for (const name of ['radiant', 'minder', 'hippocampus', 'graph_structural', 'spine_state']) {
+    assert.ok(client.sliceClients[name], `sliceClients.${name} present`);
+    assert.equal(typeof client.sliceClients[name].read, 'function');
+    assert.equal(typeof client.sliceClients[name].invalidate, 'function');
+    assert.equal(typeof client.sliceClients[name].peekCache, 'function');
+  }
+  // spine_state additionally exposes checkAvailable
+  assert.equal(typeof client.sliceClients.spine_state.checkAvailable, 'function');
+});
+
+test('p4r-3: per-slice cache reduces fetch count on second readWorldState', async () => {
+  let radiantStatsFetches = 0;
+  globalThis.fetch = async (url) => {
+    if (url.includes('/stats')) radiantStatsFetches += 1;
+    if (url.includes('/context')) return { ok: true, status: 200, json: async () => ({ blocks: [] }) };
+    if (url.includes('/memory'))  return { ok: true, status: 200, json: async () => ({ blocks: [] }) };
+    if (url.includes('/stats'))   return { ok: true, status: 200, json: async () => ({}) };
+    if (url.includes('/peers/recent'))        return { ok: true, status: 200, json: async () => ({ peers: [] }) };
+    if (url.includes('/observations/recent')) return { ok: true, status: 200, json: async () => ({ observations: [] }) };
+    if (url.includes('/conversations')) return { ok: true, status: 200, json: async () => ({ conversations: [] }) };
+    if (url.includes('/events')) return { ok: true, status: 200, json: async () => ({ events: [] }) };
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
+  const client = createCmClient({
+    radiantUrl: 'http://r', minderUrl: 'http://m', hippocampusUrl: 'http://h',
+    graphAdapter: { queryConcepts: async () => ({ rows: [] }) },
+    spineUrl: 'http://s',
+  });
+  await client({});
+  await client({});
+  // Radiant cache hit on second call → /stats not refetched
+  assert.equal(radiantStatsFetches, 1, 'radiant cache hit prevents second /stats fetch');
+});
+
 test('concurrent execution — all 5 sources start within milliseconds', async () => {
   const startTimes = [];
   globalThis.fetch = async (url) => {

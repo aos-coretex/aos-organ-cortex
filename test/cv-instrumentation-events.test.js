@@ -26,6 +26,7 @@ import assert from 'node:assert/strict';
 import { createGapAnalyzer } from '../lib/gap-analyzer.js';
 import { createGoalEmitter } from '../lib/goal-emitter.js';
 import { createGoalHistory } from '../lib/goal-history.js';
+import { createCmClient } from '../lib/cm-client.js';
 
 // Capture process.stdout for the duration of fn(); return parsed JSON event lines.
 async function captureEvents(fn) {
@@ -173,6 +174,81 @@ test('cortex_gap_analysis_response is NOT emitted when chat throws (degraded pat
   const errEvent = events.find(e => e.event === 'cortex_gap_analysis_llm_error');
   assert.ok(errEvent, 'error event must be emitted on chat failure');
   assert.equal(typeof errEvent.correlation_id, 'string');
+});
+
+test('cortex_world_state_cache_breakdown emits per readWorldState() with per-slice metrics + correlation_id (p4r-3 §Step 5)', async () => {
+  // Route mock for all 5 slice fetches.
+  globalThis.fetch = async (url) => {
+    if (url.includes('/context')) return { ok: true, status: 200, json: async () => ({ blocks: [] }) };
+    if (url.includes('/memory'))  return { ok: true, status: 200, json: async () => ({ blocks: [] }) };
+    if (url.includes('/stats'))   return { ok: true, status: 200, json: async () => ({ context_count: 0 }) };
+    if (url.includes('/peers/recent'))        return { ok: true, status: 200, json: async () => ({ peers: [] }) };
+    if (url.includes('/observations/recent')) return { ok: true, status: 200, json: async () => ({ observations: [] }) };
+    if (url.includes('/conversations')) return { ok: true, status: 200, json: async () => ({ conversations: [] }) };
+    if (url.includes('/events')) return { ok: true, status: 200, json: async () => ({ events: [] }) };
+    if (url.includes('/health')) return { ok: true, status: 200, json: async () => ({ status: 'ok' }) };
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
+  const cmClient = createCmClient({
+    radiantUrl: 'http://r', minderUrl: 'http://m', hippocampusUrl: 'http://h',
+    graphAdapter: { queryConcepts: async () => ({ rows: [] }) },
+    spineUrl: 'http://s',
+  });
+  const events = await captureEvents(async () => { await cmClient({}); });
+  const breakdown = events.find(e => e.event === 'cortex_world_state_cache_breakdown');
+  assert.ok(breakdown, 'cortex_world_state_cache_breakdown must emit per readWorldState');
+  assert.equal(typeof breakdown.correlation_id, 'string');
+  assert.ok(breakdown.slices);
+  // All 5 slices reported
+  assert.ok(breakdown.slices.radiant);
+  assert.ok(breakdown.slices.minder);
+  assert.ok(breakdown.slices.hippocampus);
+  assert.ok(breakdown.slices.graph_structural);
+  assert.ok(breakdown.slices.spine_state);
+  // First call: every cacheable slice is a miss with fetched_ms
+  assert.equal(breakdown.slices.radiant.hit, false);
+  assert.equal(typeof breakdown.slices.radiant.fetched_ms, 'number');
+  assert.equal(typeof breakdown.slices.radiant.tokens_cl100k, 'number');
+  // spine_state always reports new_transitions + evicted (cursor design, not TTL)
+  assert.equal(typeof breakdown.slices.spine_state.new_transitions, 'number');
+  assert.equal(typeof breakdown.slices.spine_state.evicted, 'number');
+  // tokens_cl100k present on every slice
+  for (const sliceName of ['radiant', 'minder', 'hippocampus', 'graph_structural', 'spine_state']) {
+    assert.equal(typeof breakdown.slices[sliceName].tokens_cl100k, 'number');
+  }
+});
+
+test('cortex_world_state_cache_breakdown reports hit:true on second readWorldState within TTL (p4r-3 cache leverage)', async () => {
+  globalThis.fetch = async (url) => {
+    if (url.includes('/context')) return { ok: true, status: 200, json: async () => ({ blocks: [] }) };
+    if (url.includes('/memory'))  return { ok: true, status: 200, json: async () => ({ blocks: [] }) };
+    if (url.includes('/stats'))   return { ok: true, status: 200, json: async () => ({}) };
+    if (url.includes('/peers/recent'))        return { ok: true, status: 200, json: async () => ({ peers: [] }) };
+    if (url.includes('/observations/recent')) return { ok: true, status: 200, json: async () => ({ observations: [] }) };
+    if (url.includes('/conversations')) return { ok: true, status: 200, json: async () => ({ conversations: [] }) };
+    if (url.includes('/events')) return { ok: true, status: 200, json: async () => ({ events: [] }) };
+    if (url.includes('/health')) return { ok: true, status: 200, json: async () => ({}) };
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
+  const cmClient = createCmClient({
+    radiantUrl: 'http://r', minderUrl: 'http://m', hippocampusUrl: 'http://h',
+    graphAdapter: { queryConcepts: async () => ({ rows: [] }) },
+    spineUrl: 'http://s',
+  });
+  const events = await captureEvents(async () => {
+    await cmClient({});
+    await cmClient({});
+  });
+  const breakdowns = events.filter(e => e.event === 'cortex_world_state_cache_breakdown');
+  assert.equal(breakdowns.length, 2, 'one breakdown per readWorldState');
+  // Second call: 4 cacheable slices report hit:true; spine_state always misses (cursor design)
+  assert.equal(breakdowns[1].slices.radiant.hit, true);
+  assert.equal(breakdowns[1].slices.minder.hit, true);
+  assert.equal(breakdowns[1].slices.hippocampus.hit, true);
+  assert.equal(breakdowns[1].slices.graph_structural.hit, true);
+  assert.equal(breakdowns[1].slices.spine_state.hit, false);
+  // Each cache hit reports age_ms; misses report fetched_ms
+  assert.equal(typeof breakdowns[1].slices.radiant.age_ms, 'number');
 });
 
 test('cortex_goal_dispatched log event includes source_category + description (p4r-2 §1d)', async () => {
