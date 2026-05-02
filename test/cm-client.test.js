@@ -85,6 +85,59 @@ test('readWorldState returns full snapshot when all 5 sources are OK', async () 
   );
 });
 
+test('Radiant blocks are stripped of embedding and redundant/null fields (C2A cortex-03 Source 1)', async () => {
+  const embeddingString = '[' + Array.from({ length: 768 }, (_, i) => (i * 0.001).toFixed(6)).join(',') + ']';
+  const rawContextBlock = {
+    id: 'block-1',
+    lifecycle: 'context',
+    content: 'hello',
+    metadata: { type: 'test' },
+    session_id: null,
+    entity: 'llm-ops',
+    source_sessions: null,
+    embedding: embeddingString,
+    created_at: 't1',
+    expires_at: 't2',
+    promoted_at: null,
+    created_by: 'test',
+  };
+  const rawMemoryBlock = {
+    ...rawContextBlock,
+    id: 'block-2',
+    lifecycle: 'memory',
+    session_id: 'session-abc',  // non-null — must be retained
+  };
+
+  const routes = {
+    ...happyRoutes,
+    '/context': { status: 200, body: { blocks: [rawContextBlock] } },
+    '/memory':  { status: 200, body: { blocks: [rawMemoryBlock] } },
+  };
+  routeFetch(routes);
+
+  const client = createCmClient({
+    radiantUrl: 'http://r', minderUrl: 'http://m', hippocampusUrl: 'http://h',
+    graphAdapter: fakeGraph(), spineUrl: 'http://s',
+  });
+  const { snapshot } = await client({});
+
+  const ctx = snapshot.radiant.recent_context[0];
+  assert.equal(ctx.embedding, undefined, 'embedding must be stripped — not decision-relevant');
+  assert.equal(ctx.lifecycle, undefined, 'lifecycle must be stripped — redundant');
+  assert.equal(ctx.session_id, undefined, 'null session_id must be stripped');
+  assert.equal(ctx.source_sessions, undefined, 'null source_sessions must be stripped');
+  assert.equal(ctx.promoted_at, undefined, 'null promoted_at must be stripped');
+  assert.equal(ctx.id, 'block-1', 'id must be retained');
+  assert.equal(ctx.content, 'hello', 'content must be retained');
+  assert.equal(ctx.entity, 'llm-ops', 'entity must be retained');
+  assert.equal(ctx.created_at, 't1', 'created_at must be retained');
+  assert.deepEqual(ctx.metadata, { type: 'test' }, 'metadata must be retained');
+
+  const mem = snapshot.radiant.recent_memory[0];
+  assert.equal(mem.embedding, undefined, 'memory embedding must be stripped');
+  assert.equal(mem.session_id, 'session-abc', 'non-null session_id must be retained');
+});
+
 test('hippocampus mapping falls back to persona_urn when user_urn missing', async () => {
   const routes = {
     ...happyRoutes,
