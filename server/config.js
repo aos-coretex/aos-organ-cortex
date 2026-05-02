@@ -45,9 +45,9 @@ export default {
 
   // Assessment loop cadence (RFI-1 Q5 — confirmed verbatim)
   loop: {
-    floorMs:    parseInt(process.env.CORTEX_LOOP_FLOOR_MS   || '30000', 10),   // 30s
-    ceilingMs:  parseInt(process.env.CORTEX_LOOP_CEILING_MS || '900000', 10),  // 15min
-    startMs:    parseInt(process.env.CORTEX_LOOP_START_MS   || '300000', 10),  // 5min
+    floorMs:    parseInt(process.env.CORTEX_LOOP_FLOOR_MS   || '1260000', 10), // 21min (Track-C-coda Day-2; was 30s; pinned per CEO 1404 R Directive 2)
+    ceilingMs:  parseInt(process.env.CORTEX_LOOP_CEILING_MS || '1260000', 10), // 21min (Track-C-coda Day-2; was 15min; pinned per CEO 1404 R Directive 2)
+    startMs:    parseInt(process.env.CORTEX_LOOP_START_MS   || '1260000', 10), // 21min (Track-C-coda Day-2; was 5min; pinned per CEO 1404 R Directive 2)
     gapDivisor: 2,    // next = max(floor, current / 2)  on gaps found
     idleFactor: 1.5,  // next = min(ceiling, current * 1.5) on idle
     pressureFactor: 2, // next = min(ceiling, current * 2) on Thalamus mailbox_pressure
