@@ -174,6 +174,50 @@ test('peekCache returns null after invalidate', async () => {
   assert.equal(loader.peekCache(), null);
 });
 
+test('getMSPText returns cached MSP raw_text (p4r-2 Layer 1 fallback getter)', async () => {
+  const loader = createMissionLoader({
+    graphAdapter: fakeGraph({ msp: sampleMspRow }),
+    arbiterClient: fakeArbiter({ bor: sampleBor }),
+  });
+  const mspText = await loader.getMSPText();
+  assert.ok(mspText.startsWith('# Mission'));
+});
+
+test('getBoRText returns cached BoR raw_text (p4r-2 Layer 1 fallback getter)', async () => {
+  const loader = createMissionLoader({
+    graphAdapter: fakeGraph({ msp: sampleMspRow }),
+    arbiterClient: fakeArbiter({ bor: sampleBor }),
+  });
+  const borText = await loader.getBoRText();
+  assert.ok(borText.startsWith('# Bill of Rights'));
+});
+
+test('getMSPText/getBoRText return null on degraded sources', async () => {
+  const loader = createMissionLoader({
+    graphAdapter: fakeGraph({ msp: null }),
+    arbiterClient: fakeArbiter({ bor: null }),
+  });
+  assert.equal(await loader.getMSPText(), null);
+  assert.equal(await loader.getBoRText(), null);
+});
+
+test('getMSPText/getBoRText share TTL cache with loadMission (no re-fetch)', async () => {
+  let mspCalls = 0;
+  let borCalls = 0;
+  const graph = {
+    queryConcepts: async () => { mspCalls += 1; return { rows: [sampleMspRow], count: 1 }; },
+  };
+  const arbiter = {
+    getBoRRaw: async () => { borCalls += 1; return sampleBor; },
+  };
+  const loader = createMissionLoader({ graphAdapter: graph, arbiterClient: arbiter, cacheTtlMs: 60000 });
+  await loader.loadMission();
+  await loader.getMSPText();
+  await loader.getBoRText();
+  assert.equal(mspCalls, 1, 'MSP fetched once; getMSPText served from cache');
+  assert.equal(borCalls, 1, 'BoR fetched once; getBoRText served from cache');
+});
+
 test('concurrent MSP and BoR loads (Promise.all parallelism)', async () => {
   let mspStartedAt, borStartedAt;
   const graph = {
