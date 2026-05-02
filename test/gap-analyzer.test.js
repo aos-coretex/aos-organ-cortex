@@ -183,3 +183,70 @@ test('analyzeGaps function exposes its llm reference (x2p-7 §6.2)', () => {
   assert.equal(analyzer.llm, llm, 'analyzer should expose its llm reference');
   assert.equal(typeof analyzer.llm.isAvailable, 'function');
 });
+
+// === p4r-4: backward-compatibility & reassembly-path branching ===
+
+test('p4r-4 backward-compat: analyzeGaps without perDomainAnalyzers config follows single-pass path', async () => {
+  // No perDomainAnalyzers in config — the analyzer must follow the existing
+  // p4r-3 single-pass path (LLM call, sort, finalize, gap_id minted).
+  const llm = mockLlm({
+    response: {
+      content: JSON.stringify({
+        gaps: [
+          { description: 'g1', target_state: 't', mission_ref: 'MSP §1', evidence_refs: ['urn:e:1'], priority: 'high', severity: 0.5, source_category: 'operational' },
+        ],
+      }),
+      model: 'm', input_tokens: 1, output_tokens: 1,
+    },
+  });
+  const analyzer = createGapAnalyzer({
+    llmConfig: { agentName: 'test' },
+    injectedLlm: llm,
+    goalHistory: createGoalHistory(),
+    // perDomainAnalyzers intentionally omitted
+  });
+  const { gaps } = await analyzer(sampleMission, sampleWorld);
+  assert.equal(gaps.length, 1);
+  // Single-pass mints a gap_id URN
+  assert.match(gaps[0].gap_id, /^urn:llm-ops:cortex-gap:/);
+  // perDomainAnalyzers attribute is null in this mode (introspection)
+  assert.equal(analyzer.perDomainAnalyzers, null);
+});
+
+test('p4r-4 reassembly path: when perDomainAnalyzers config provided, single-pass LLM is NOT called', async () => {
+  // Self-contained mock with its own call counter — avoids cross-test pollution
+  // of the module-level mockLlm.lastSystem state.
+  let singlePassChatCalls = 0;
+  const llm = {
+    isAvailable: () => true,
+    chat: async () => {
+      singlePassChatCalls += 1;
+      return { content: JSON.stringify({ gaps: [] }), model: 'm', input_tokens: 0, output_tokens: 0 };
+    },
+    getUsage: () => ({}),
+  };
+  let perDomainCalled = false;
+  const analyzer = createGapAnalyzer({
+    llmConfig: { agentName: 'test' },
+    injectedLlm: llm,
+    goalHistory: createGoalHistory(),
+    perDomainAnalyzers: {
+      operational: async () => {
+        perDomainCalled = true;
+        return {
+          gaps: [
+            { description: 'op-gap', target_state: 'ok', mission_ref: 'MSP §op', evidence_refs: ['urn:llm-ops:spine-transition:t1'], priority: 'high', severity: 0.7, source_category: 'operational' },
+          ],
+        };
+      },
+    },
+  });
+  const { gaps } = await analyzer(sampleMission, sampleWorld);
+  assert.ok(perDomainCalled, 'per-domain analyzer should be invoked');
+  // The single-pass LLM must NOT have been called
+  assert.equal(singlePassChatCalls, 0, 'single-pass LLM chat must not be called in reassembly mode');
+  assert.equal(gaps.length, 1);
+  assert.equal(gaps[0].source_category, 'operational');
+  // Reassembly-mode introspection
+  assert.ok(analyzer.perDomainAnalyzers, 'perDomainAnalyzers should be exposed for introspection');
+});
