@@ -3,7 +3,18 @@
  *
  * Subscribes to:
  *   - mailbox_pressure: backpressure signal. If data.organ_name === 'Thalamus',
- *     call assessmentLoop.onPressure('Thalamus') to double the next interval.
+ *     call assessmentLoop.onPressure('Thalamus') to double the next interval
+ *     (existing pressureFactor mechanism — interval growth) AND, if a
+ *     backpressureSignal ref is wired (p4r-5), set its `active` flag to true
+ *     so the cadenceExecutor's mode-switching path observes the event on the
+ *     next cycle. The two mechanisms are independent — cadence growth (when
+ *     to assess) vs cadence-mode switching (which analyzers).
+ *   - mailbox_pressure_clear: defensive case. Spine does NOT emit this event
+ *     today; the cadenceExecutor uses consume-once semantics on the
+ *     backpressureSignal, so explicit clearance is not required for current
+ *     deployment. The handler treats it as a passive flag-clear if/when Spine
+ *     adds it. Cross-feed candidate: ESB-I → Spine team to introduce
+ *     mailbox_pressure_clear in the broadcast set, paired with this consumer.
  *   - msp_updated: Senate-emitted. Invalidate mission cache so the next
  *     assessment re-reads the active MSP.
  *   - bor_updated: Arbiter-emitted (if implemented). Invalidate mission cache
@@ -20,7 +31,7 @@ function log(event, data = {}) {
   process.stdout.write(JSON.stringify(entry) + '\n');
 }
 
-export function createBroadcastHandler({ assessmentLoop, missionLoader }) {
+export function createBroadcastHandler({ assessmentLoop, missionLoader, backpressureSignal }) {
   return async function handleBroadcast(envelope) {
     const eventType = envelope?.payload?.event_type;
     switch (eventType) {
@@ -32,6 +43,21 @@ export function createBroadcastHandler({ assessmentLoop, missionLoader }) {
             threshold: envelope.payload.data.threshold,
           });
           assessmentLoop.onPressure('Thalamus');
+          if (backpressureSignal) {
+            backpressureSignal.active = true;
+          }
+        }
+        return;
+      }
+      case 'mailbox_pressure_clear': {
+        // Spine does not emit this today; defensive handler for future
+        // cross-feed (ESB-I → Spine). Consume-once semantics in the cadence
+        // executor mean explicit clearance is not load-bearing for current
+        // deployment — the executor self-clears the signal each cycle.
+        const organName = envelope.payload?.data?.organ_name;
+        if (organName === 'Thalamus' && backpressureSignal) {
+          log('cortex_thalamus_backpressure_clear', {});
+          backpressureSignal.active = false;
         }
         return;
       }
