@@ -353,6 +353,63 @@ test('reassembly: spine_state absent → empty gaps + flagged (no per-domain cal
   assert.equal(recorder.recorded.length, 0);
 });
 
+// === p4r-7 Step 0 — gap_id + analyzed_at mint backstop in reassembly ===
+
+test('p4r-7 Step 0: reassembly mints gap_id + analyzed_at when per-domain analyzers leave them unset', async () => {
+  // Per-domain analyzers return gaps WITHOUT gap_id or analyzed_at fields.
+  const analyzer = createGapAnalyzer({
+    llmConfig: { agentName: 'test' },
+    goalHistory: createGoalHistory(),
+    perDomainAnalyzers: {
+      operational: makeDomainAnalyzer('operational',    [gap('operational',    EV.operational,    'high',     0.7)]),
+      strategic:   makeDomainAnalyzer('strategic',      [gap('strategic',      EV.strategic,      'medium',   0.5)]),
+      relational:  makeDomainAnalyzer('relational',     [gap('relational',     EV.relational,     'critical', 0.9)]),
+    },
+  });
+
+  const beforeIso = new Date().toISOString();
+  const { gaps } = await analyzer(sampleMission, sampleWorld);
+  const afterIso = new Date().toISOString();
+
+  assert.equal(gaps.length, 3, 'three domains contribute one gap each');
+  for (const g of gaps) {
+    assert.match(
+      g.gap_id,
+      /^urn:llm-ops:cortex-gap:\d+-\d+-[0-9a-z]{1,6}$/,
+      `gap_id must be minted in single-pass URN format; got ${g.gap_id}`,
+    );
+    assert.ok(g.analyzed_at, 'analyzed_at must be set');
+    assert.ok(
+      g.analyzed_at >= beforeIso && g.analyzed_at <= afterIso,
+      `analyzed_at (${g.analyzed_at}) must be within test execution window [${beforeIso}, ${afterIso}]`,
+    );
+  }
+
+  // Distinct gap_ids per gap (idx-suffixed → unique)
+  const ids = new Set(gaps.map(g => g.gap_id));
+  assert.equal(ids.size, 3, 'gap_ids must be unique per gap');
+});
+
+test('p4r-7 Step 0: reassembly preserves gap_id + analyzed_at when per-domain analyzer mints them', async () => {
+  const preMintedGap = {
+    ...gap('strategic', EV.strategic, 'high', 0.7),
+    gap_id: 'urn:llm-ops:cortex-gap:9999999999-0-premint',
+    analyzed_at: '2020-01-01T00:00:00.000Z',
+  };
+  const analyzer = createGapAnalyzer({
+    llmConfig: { agentName: 'test' },
+    goalHistory: createGoalHistory(),
+    perDomainAnalyzers: {
+      strategic: makeDomainAnalyzer('strategic', [preMintedGap]),
+    },
+  });
+
+  const { gaps } = await analyzer(sampleMission, sampleWorld);
+  assert.equal(gaps.length, 1);
+  assert.equal(gaps[0].gap_id, 'urn:llm-ops:cortex-gap:9999999999-0-premint', 'pre-minted gap_id must be respected');
+  assert.equal(gaps[0].analyzed_at, '2020-01-01T00:00:00.000Z', 'pre-minted analyzed_at must be respected');
+});
+
 // === LLM-availability bypass in reassembly mode ===
 
 test('reassembly mode bypasses single-LLM availability check (each analyzer brings own LLM)', async () => {
